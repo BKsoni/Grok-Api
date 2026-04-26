@@ -1,55 +1,52 @@
-from fastapi      import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from urllib.parse import urlparse, ParseResult
-from pydantic     import BaseModel
-from core         import Grok
-from uvicorn      import run
-
+from pydantic import BaseModel
+from core import Grok
+from uvicorn import run
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class ConversationRequest(BaseModel):
-    proxy: str
+    proxy: str | None = None
     message: str
     model: str = "grok-3-auto"
-    extra_data: dict = None
+    extra_data: dict | None = None
 
-def format_proxy(proxy: str) -> str:
-    
+def format_proxy(proxy: str) -> str | None:
+    if not proxy:
+        return None
     if not proxy.startswith(("http://", "https://")):
-        proxy: str = "http://" + proxy
-    
+        proxy = "http://" + proxy
     try:
         parsed: ParseResult = urlparse(proxy)
-
         if parsed.scheme not in ("http", ""):
             raise ValueError("Not http scheme")
-
         if not parsed.hostname or not parsed.port:
             raise ValueError("No url and port")
-
         if parsed.username and parsed.password:
             return f"http://{parsed.username}:{parsed.password}@{parsed.hostname}:{parsed.port}"
-        
         else:
             return f"http://{parsed.hostname}:{parsed.port}"
-    
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid proxy format: {str(e)}")
 
 @app.post("/ask")
 async def create_conversation(request: ConversationRequest):
-    if not request.proxy or not request.message:
-        raise HTTPException(status_code=400, detail="Proxy and message are required")
-    
-    proxy = format_proxy(request.proxy)
-    
+    if not request.message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    # Safely handle the proxy formatting
+    proxy = format_proxy(request.proxy) if request.proxy else None
     try:
         answer: dict = Grok(request.model, proxy).start_convo(request.message, request.extra_data)
-
-        return {
-            "status": "success",
-            **answer
-        }
+        return {"status": "success", **answer}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
